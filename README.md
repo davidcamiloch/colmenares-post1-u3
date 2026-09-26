@@ -223,3 +223,101 @@ El volcado del programa de bucle se obtiene con `D CS:100 L0D`; el sufijo L0D so
 ```
 
 Se observa que la longitud de cada instrucción depende de su codificación y no de su complejidad aparente. Las dos cargas inmediatas ocupan tres bytes cada una porque arrastran un operando de 16 bits. La suma inmediata también ocupa tres bytes; por otra razón; el opcode 83h corresponde a la forma que acepta un operando inmediato de ocho bits con extensión de signo; 02h viaja en un solo byte y el byte C0h identifica el registro destino. LOOP ocupa dos bytes porque su operando es un desplazamiento de un solo byte. INT 20 ocupa dos bytes porque su operando es el número de interrupción. El programa completo suma trece bytes y realiza cuatro sumas de forma iterativa; una versión sin bucle que repitiera la suma cuatro veces ocuparía doce bytes solo en las sumas más los seis de la inicialización y la terminación; el bucle no ahorra espacio en casos tan pequeños pero escala mucho mejor.
+
+## Checkpoint 3 — Bucle equivalente con DEC y JNZ
+
+Capturas: `capturas/CP3_traza_dec_jnz.png`; `capturas/CP3_traza_dec_jnz_parte2.png`; `capturas/CP3_traza_dec_jnz_parte3.png`; `capturas/CP3_traza_dec_jnz_parte4.png` y `capturas/CP3_traza_dec_jnz_parte5.png`
+
+Programa ensamblado en 0200h para no sobrescribir el anterior.
+
+| Dirección | Bytes | Instrucción |
+|---|---|---|
+| 0200 | B8 00 00 | MOV AX,0000 |
+| 0203 | B9 04 00 | MOV CX,0004 |
+| 0206 | 83 C0 02 | ADD AX,0002 |
+| 0209 | 49 | DEC CX |
+| 020A | 75 FA | JNZ 0206 |
+| 020C | CD 20 | INT 20 |
+
+Cálculo del desplazamiento de JNZ.
+
+```
+destino - direccion_siguiente = 0206h - 020Ch = -6 = FAh
+```
+
+Comparación de tamaño. LOOP resuelve el control del bucle con dos bytes en una sola instrucción; DEC CX más JNZ requiere tres bytes repartidos en dos instrucciones para producir el mismo efecto observable. La diferencia es de un byte de código y de una instrucción adicional por iteración.
+
+Tabla de traza. Valores observados tras cada ejecución de T.
+
+| Iteración | Instrucción | AX después | CX después | IP siguiente | ¿JNZ salta? |
+|---|---|---|---|---|---|
+| — | MOV AX,0000 | 0000 | 0000 | 0203 | no aplica |
+| — | MOV CX,0004 | 0000 | 0004 | 0206 | no aplica |
+| 1 | ADD AX,0002 | 0002 | 0004 | 0209 | no aplica |
+| 1 | DEC CX | 0002 | 0003 | 020A | no aplica |
+| 1 | JNZ 0206 | 0002 | 0003 | 0206 | sí |
+| 2 | ADD AX,0002 | 0004 | 0003 | 0209 | no aplica |
+| 2 | DEC CX | 0004 | 0002 | 020A | no aplica |
+| 2 | JNZ 0206 | 0004 | 0002 | 0206 | sí |
+| 3 | ADD AX,0002 | 0006 | 0002 | 0209 | no aplica |
+| 3 | DEC CX | 0006 | 0001 | 020A | no aplica |
+| 3 | JNZ 0206 | 0006 | 0001 | 0206 | sí |
+| 4 | ADD AX,0002 | 0008 | 0001 | 0209 | no aplica |
+| 4 | DEC CX | 0008 | 0000 | 020A | no aplica |
+| 4 | JNZ 0206 | 0008 | 0000 | 020C | no |
+| — | INT 20 | 0008 | 0000 | fin | no aplica |
+
+Observaciones sobre las banderas. Aquí sí hay evidencia directa del papel del registro de banderas como puente entre la aritmética y el salto. Mientras CX baja de 0004h a 0001h la línea de estado muestra NZ; la bandera de cero apagada. JNZ salta. En la cuarta vuelta DEC CX deja CX en 0000h y la línea cambia a ZR; en la ejecución siguiente JNZ lee esa bandera y no salta; el IP avanza a 020Ch. La bandera es el único dato que conecta las dos instrucciones; DEC no le dice nada a JNZ por otra vía. Esa dependencia explícita es justo lo que LOOP oculta dentro de una sola instrucción. Al ejecutar la última instrucción el depurador respondió `Program terminated normally (0000)`.
+
+### Conteo comparado de instrucciones ejecutadas
+
+| Mecanismo | Inicialización | Cuerpo por iteración | Total de iteraciones | Terminación | Instrucciones ejecutadas |
+|---|---|---|---|---|---|
+| LOOP | 2 | 2 instrucciones | 4 | 1 | 2 + 8 + 1 = 11 |
+| DEC y JNZ | 2 | 3 instrucciones | 4 | 1 | 2 + 12 + 1 = 15 |
+
+La diferencia de cuatro instrucciones corresponde exactamente a una instrucción adicional por cada una de las cuatro iteraciones; es la instrucción de control extra que el mecanismo DEC y JNZ necesita frente a LOOP. El conteo se verificó en la práctica; la traza del bucle LOOP exigió diez pulsaciones de T para llegar a INT 20 y la del bucle DEC y JNZ exigió catorce. Ambos programas terminan con AX en 0008h; son semánticamente equivalentes pese a su distinto costo.
+
+### Decisión técnica 3 — Selección del mecanismo de control de bucle
+
+El estudiante recomienda LOOP para este bucle contador. La codificación lo sostiene; LOOP ocupa dos bytes en una sola instrucción mientras DEC CX seguido de JNZ ocupa tres bytes en dos instrucciones. El procesador extrae una instrucción menos por iteración; sobre cuatro iteraciones son cuatro extracciones menos y un byte menos de código. CX no se necesita para otro propósito dentro del cuerpo; no hay motivo para pagar ese costo. El estudiante preferiría DEC y JNZ si el cuerpo tuviera que reutilizar CX en otra operación aritmética; también si la salida dependiera de una comparación evaluada con CMP. El comando U compara los tamaños sin ejecutar nada; E2 FB frente a 49 75 FA.
+
+### Decisión técnica 4 — Comando de verificación para bucles de muchas iteraciones
+
+Con un contador de 0064h el comando T exigiría más de trescientas pulsaciones; G 20C alcanza el mismo punto con una sola orden. El depurador sustituye el byte destino por el opcode CC y deja correr el programa a velocidad completa. Lo que se pierde es la granularidad; G no revela ningún estado intermedio de AX; de CX ni de las banderas. T fue necesario en los Pasos 4; 7 y 11; las tres tablas de traza piden el estado después de cada instrucción y esa información solo existe si el procesador se detiene en cada una. Tras G 20C el estudiante confirma el valor final de AX con el comando R.
+
+Salida real de la demostración.
+
+```
+-G 20C
+AX=0008  BX=0000  CX=0000  DX=0000  SP=FFFE  BP=0000  SI=0000  DI=0000
+DS=0725  ES=0725  SS=0725  CS=0725  IP=020C   NV UP EI PL ZR NA PE NC
+0725:020C CD20          INT     20
+```
+
+El comando entregó AX=0008h en una sola orden; idéntico al valor que la traza alcanzó en catorce pasos. Se observa además que la bandera ZR aparece activa; es el residuo del último DEC CX; G la conserva aunque no haya mostrado la instrucción que la produjo.
+
+---
+
+## Observaciones sobre la guía del laboratorio
+
+Durante la ejecución el estudiante detectó diez discrepancias entre el enunciado de la guía y el comportamiento real del DEBUG dentro de DOSBox. Las codificaciones fueron contrastadas además con un ensamblador NASM. En este repositorio se documentan los valores realmente observados.
+
+| # | Ubicación | Lo que dice la guía | Lo que ocurre en realidad |
+|---|---|---|---|
+| 1 | Parte 2, Paso 5 | El listado de A ubica LOOP en 010A e INT 20 en 010C | La suma inmediata ocupa tres bytes; LOOP queda en 0109 e INT 20 en 010B. Confirmado en la sesión |
+| 2 | Parte 2, Paso 8 | El comando indicado es D CS:100 L0C | L0C vuelca doce bytes; el programa ocupa trece, como afirma el propio texto del paso. El comando exacto es D CS:100 L0D |
+| 3 | Parte 2, Paso 8 | El volcado muestra los bytes 05 02 00 para ADD AX,0002 | El DEBUG emitió 83 C0 02, que es la forma con inmediato de ocho bits y extensión de signo. La guía se contradice a sí misma; su listado de U dice ADD AX,+02, que corresponde a 83 C0 02 y no a 05 02 00 |
+| 4 | Parte 2, Paso 6 | El rango indicado es U 100 10D | El programa termina en 010C; el rango exacto es U 100 10C |
+| 5 | Parte 1, Paso 9 | La columna de bytes aparece como 00000 | Dos bytes en cero se transcriben con cuatro dígitos; 0000 |
+| 6 | Parte 1, Paso 5 | La segunda invocación de R AX devuelve la línea completa de registros | R AX responde solo con el valor de AX y el prompt de edición. La línea completa se obtiene con R sin argumento |
+| 7 | Entregables | Se habla de ocho checkpoints con captura | El Checkpoint 4 de la Parte 2 verifica el repositorio y no produce captura; las imágenes son siete y así las enumera la rúbrica |
+| 8 | Partes 1 y 2, prerrequisitos | Se ordena crear las carpetas LAB3POST1 y LAB3POST2 | Ambos nombres tienen nueve caracteres y DOS admite ocho; el sistema los recorta en silencio al mismo nombre LAB3POST, por lo que el segundo MD falla con Unable to make. Se usaron LAB3POST y LAB3P2 |
+| 9 | Rúbrica, criterio de Funcionalidad | Se exige que ADD AX,BX aparezca codificado como 03 C3 | El DEBUG de FreeDOS emitió 01 D8 y ADD AX,CX como 01 C8. Ambas son codificaciones válidas de la misma operación; cambia cuál operando ocupa el campo reg del byte ModR/M |
+| 10 | Parte 2, Paso 6 | El desensamblado muestra el mnemónico LOOP | El DEBUG de FreeDOS lo muestra como LOOPW, indicando de forma explícita que el contador es CX de 16 bits |
+
+Las siete primeras son inconsistencias internas del enunciado; se detectaron leyéndolo con cuidado. Las tres últimas surgieron al ejecutar el laboratorio; provienen de que DOSBox no incluye el DEBUG de MS-DOS. El laboratorio se realizó con la implementación libre de FreeDOS; es funcionalmente equivalente pero toma decisiones distintas al ensamblar y al desensamblar.
+
+## Conclusiones
+
+El laboratorio muestra que el DEBUG expone el procesador sin ninguna capa de abstracción; no hay símbolos ni tipos; solo bytes; registros y direcciones. Esa transparencia es lo que permite observar directamente principios que un lenguaje de alto nivel oculta. El estudiante comprueba que en modo real no existe frontera entre código y datos; los mismos bytes se desensamblan como instrucción o se leen como dato según hacia dónde apunte CS:IP. Comprueba también que el tamaño de una instrucción depende de su codificación y no de lo que expresa; que una misma operación admite varias codificaciones y que el ensamblador elige una sin consultar al programador; que los saltos cortos se calculan como desplazamientos relativos a la instrucción siguiente y que dos programas semánticamente idénticos pueden diferir en bytes de código y en instrucciones ejecutadas. La traza del bucle DEC y JNZ aportó además la evidencia más directa del papel del registro de banderas; la bandera de cero es el único canal por el que DEC comunica a JNZ que debe dejar de saltar. La comparación entre T y G reproduce a escala de laboratorio la misma disyuntiva que enfrenta cualquier depurador moderno; el paso a paso entrega información completa a un costo alto y el punto de interrupción entrega velocidad a cambio de visibilidad.
