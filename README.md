@@ -75,3 +75,55 @@ Salida obtenida con `F 200 L40 AB CD EF` seguido de `D 200 L40`.
 Interpretación de las columnas del comando D. La salida se organiza en tres bloques. El primero es la dirección de inicio de la fila; se escribe como segmento y desplazamiento separados por dos puntos e indica dónde comienza el contenido que sigue. El segundo bloque son dieciséis valores hexadecimales; cada valor es un byte de memoria y el guion central separa los ocho primeros de los ocho últimos para facilitar el conteo visual. El tercer bloque es la interpretación ASCII de esos mismos dieciséis bytes; los valores que caen fuera del rango imprimible 20h a 7Eh se representan con un punto. Por esa razón el patrón AB CD EF aparece como una hilera de puntos en la columna derecha; ninguno de esos tres valores corresponde a un carácter visible.
 
 Observaciones. El comando F no confirma la operación con mensaje alguno; el retorno del prompt es la única señal de éxito. El patrón de tres bytes se repite de forma cíclica hasta completar los 40h bytes solicitados; por eso la alineación se desplaza de fila en fila; 16 no es múltiplo de 3. La primera fila empieza en AB; la segunda en CD y la tercera en EF.
+
+## Checkpoint 3 — Ensamblado con A y verificación con U
+
+Captura: `capturas/CP3_ensamblado_desensamblado.png`
+
+Programa ensamblado y codificación obtenida.
+
+| Dirección | Bytes | Instrucción | Tamaño |
+|---|---|---|---|
+| 0100 | B8 05 00 | MOV AX,0005 | 3 bytes |
+| 0103 | BB 03 00 | MOV BX,0003 | 3 bytes |
+| 0106 | 01 D8 | ADD AX,BX | 2 bytes |
+| 0108 | CD 20 | INT 20 | 2 bytes |
+
+Observaciones. El programa completo ocupa diez bytes. Se observa la correspondencia directa entre mnemónico y código máquina; el opcode B8 carga un valor inmediato de 16 bits en AX y los dos bytes siguientes son ese valor en orden little-endian; 0005h se almacena como 05 00. El opcode BB cumple la misma función sobre BX. La instrucción ADD AX,BX no lleva operando inmediato; los dos bytes codifican la operación y los registros involucrados.
+
+Sobre la codificación de ADD AX,BX conviene una precisión. La guía del curso anota 03 C3 y este laboratorio obtuvo 01 D8. Las dos son codificaciones válidas de la misma instrucción; el conjunto x86 admite dos formas para sumar dos registros y la diferencia está en cuál operando viaja en el campo reg del byte ModR/M. El opcode 03 corresponde a la forma ADD registro; registro-o-memoria y el opcode 01 a la forma ADD registro-o-memoria; registro. El DEBUG de MS-DOS elige la primera y el de FreeDOS la segunda; el efecto sobre AX es idéntico y el tamaño también.
+
+## Checkpoint 4 — Modificación con E y direccionamiento directo
+
+Captura: `capturas/CP4_memoria_direccionamiento.png`
+
+Secuencia verificada. Se limpia un rango de dieciséis bytes en 0300h con F; se vuelca con D para fijar el punto de partida; se escriben dos bytes puntuales con E 300 78 56 y se vuelca de nuevo.
+
+```
+0725:0300  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00  ................
+0725:0300  78 56 00 00 00 00 00 00-00 00 00 00 00 00 00 00  xV..............
+```
+
+El segundo volcado confirma que E modificó únicamente los dos primeros bytes; los catorce restantes siguen en cero. La columna ASCII pasa a mostrar xV porque 78h y 56h sí son caracteres imprimibles. Leídos como palabra en little-endian esos dos bytes representan el valor 5678h.
+
+| Dirección | Bytes | Instrucción | Modo de direccionamiento |
+|---|---|---|---|
+| 0320 | A1 00 03 | MOV AX,[0300] | Directo a memoria |
+| 0323 | CD 20 | INT 20 | Sin operando |
+
+Resultado tras ejecutar la instrucción con T.
+
+```
+AX=5678  BX=0000  CX=0000  DX=0000  SP=FFFE  BP=0000  SI=0000  DI=0000
+DS=0725  ES=0725  SS=0725  CS=0725  IP=0323   NV UP EI PL NZ NA PO NC
+```
+
+AX toma el valor 5678h; esto confirma que el dato escrito con E fue leído correctamente desde la dirección 0300h y que el orden little-endian se aplica también en la lectura.
+
+### Decisión técnica 1 — Verificación no destructiva de una escritura en memoria
+
+El estudiante selecciona D como comando de verificación. Invocar E 300 sin la lista de bytes abre el modo interactivo; el depurador muestra cada byte y espera una pulsación; una tecla equivocada sobrescribe el dato que se quería comprobar. Con la lista completa de bytes E es determinista; sin ella es una edición a ciegas. F tampoco sirve; su propósito es escribir un patrón sobre un rango completo y destruiría el contenido que se quiere leer. R alcanza registros y no memoria. D es el único que solo lee; recibe un rango y devuelve su contenido sin modificar un byte. Esa propiedad de solo lectura es la que exige esta verificación.
+
+### Decisión técnica 2 — Direccionamiento inmediato frente a directo a memoria
+
+Ambas instrucciones ocupan tres bytes; su costo de ejecución difiere. En MOV AX,0005 el opcode B8 trae el valor incrustado en el flujo de instrucción; el procesador ya dispone del dato al terminar la extracción. En MOV AX,[0300] el opcode A1 trae una dirección; el procesador debe resolverla contra DS y ejecutar un acceso adicional al bus para leerlo. El modo directo paga ese ciclo extra. El estudiante lo prefiere cuando el valor puede cambiar en ejecución; por ejemplo el 5678h escrito con E. Una constante fija conocida al ensamblar se resuelve mejor con inmediato. El comando U confirma cada codificación sin ejecutar nada; B8 05 00 frente a A1 00 03.
