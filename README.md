@@ -127,3 +127,99 @@ El estudiante selecciona D como comando de verificación. Invocar E 300 sin la l
 ### Decisión técnica 2 — Direccionamiento inmediato frente a directo a memoria
 
 Ambas instrucciones ocupan tres bytes; su costo de ejecución difiere. En MOV AX,0005 el opcode B8 trae el valor incrustado en el flujo de instrucción; el procesador ya dispone del dato al terminar la extracción. En MOV AX,[0300] el opcode A1 trae una dirección; el procesador debe resolverla contra DS y ejecutar un acceso adicional al bus para leerlo. El modo directo paga ese ciclo extra. El estudiante lo prefiere cuando el valor puede cambiar en ejecución; por ejemplo el 5678h escrito con E. Una constante fija conocida al ensamblar se resuelve mejor con inmediato. El comando U confirma cada codificación sin ejecutar nada; B8 05 00 frente a A1 00 03.
+
+---
+
+# Parte 2 — Ensamblado y Ejecución Paso a Paso
+
+## Comandos empleados en la Parte 2
+
+| Comando | Función | Paso donde se usa |
+|---|---|---|
+| A | Ensambla los tres programas del laboratorio | 2; 5 y 9 |
+| U | Verifica la codificación antes de ejecutar | 3; 6 y 9 |
+| R IP | Restablece el puntero de instrucción antes de cada traza | 3; 7; 11 y 12 |
+| T | Ejecuta una instrucción y muestra el estado resultante | 4; 7 y 11 |
+| G | Ejecuta a velocidad completa hasta un punto de interrupción | 12 |
+| D | Vuelca el código máquina del programa de bucle | 8 |
+
+## Checkpoint 1 — Tabla de traza del programa de suma
+
+Capturas: `capturas/CP1_traza_suma.png` y `capturas/CP1_traza_suma_parte2.png`
+
+Programa ensamblado.
+
+| Dirección | Bytes | Instrucción |
+|---|---|---|
+| 0100 | B8 0A 00 | MOV AX,000A |
+| 0103 | BB 05 00 | MOV BX,0005 |
+| 0106 | B9 03 00 | MOV CX,0003 |
+| 0109 | 01 D8 | ADD AX,BX |
+| 010B | 01 C8 | ADD AX,CX |
+| 010D | CD 20 | INT 20 |
+
+Tabla de traza. Valores observados tras cada ejecución de T.
+
+| Instrucción | AX | BX | CX | IP siguiente | ZF | CF | SF |
+|---|---|---|---|---|---|---|---|
+| MOV AX,000A | 000A | 0000 | 0000 | 0103 | NZ | NC | PL |
+| MOV BX,0005 | 000A | 0005 | 0000 | 0106 | NZ | NC | PL |
+| MOV CX,0003 | 000A | 0005 | 0003 | 0109 | NZ | NC | PL |
+| ADD AX,BX | 000F | 0005 | 0003 | 010B | NZ | NC | PL |
+| ADD AX,CX | 0012 | 0005 | 0003 | 010D | NZ | NC | PL |
+| INT 20 | 0012 | 0005 | 0003 | fin | NZ | NC | PL |
+
+Observaciones. Las tres primeras instrucciones son transferencias de datos y no alteran ninguna bandera; las columnas ZF; CF y SF repiten el estado inicial NZ NC PL. La aritmética empieza en la cuarta instrucción; 000Ah más 0005h da 000Fh y luego 000Fh más 0003h da 0012h; 18 en decimal. Ninguna de las dos sumas activa el acarreo ni el cero ni el signo porque el resultado cabe holgadamente en 16 bits y es positivo. Sí cambian otras banderas que el DEBUG muestra en la misma línea; la paridad pasa de PO a PE al obtener 000Fh y el acarreo auxiliar pasa a AC al obtener 0012h; la suma arrastró desde el nibble bajo. Ese detalle ilustra que una operación aritmética actualiza el registro de banderas completo y no solo las banderas que el programador está mirando.
+
+## Checkpoint 2 — Tabla de traza del bucle con LOOP
+
+Capturas: `capturas/CP2_traza_loop.png`; `capturas/CP2_traza_loop_parte2.png` y `capturas/CP2_traza_loop_parte3.png`
+
+Programa ensamblado.
+
+| Dirección | Bytes | Instrucción |
+|---|---|---|
+| 0100 | B8 00 00 | MOV AX,0000 |
+| 0103 | B9 04 00 | MOV CX,0004 |
+| 0106 | 83 C0 02 | ADD AX,0002 |
+| 0109 | E2 FB | LOOP 0106 |
+| 010B | CD 20 | INT 20 |
+
+Cálculo del desplazamiento de LOOP. La instrucción ocupa las direcciones 0109h y 010Ah; la instrucción siguiente comienza en 010Bh. Los saltos cortos del 8086 son relativos y se calculan desde la dirección de la instrucción siguiente.
+
+```
+destino - direccion_siguiente = 0106h - 010Bh = -5 = FBh
+```
+
+El byte E2h es el opcode de LOOP y FBh es ese desplazamiento de ocho bits con signo. El rango alcanzable por un salto corto es por tanto de -128 a +127 bytes.
+
+Tabla de traza. Valores observados tras cada ejecución de T.
+
+| Iteración | Instrucción | AX después | CX después | IP siguiente | ¿LOOP salta? |
+|---|---|---|---|---|---|
+| — | MOV AX,0000 | 0000 | 0000 | 0103 | no aplica |
+| — | MOV CX,0004 | 0000 | 0004 | 0106 | no aplica |
+| 1 | ADD AX,0002 | 0002 | 0004 | 0109 | no aplica |
+| 1 | LOOP 0106 | 0002 | 0003 | 0106 | sí |
+| 2 | ADD AX,0002 | 0004 | 0003 | 0109 | no aplica |
+| 2 | LOOP 0106 | 0004 | 0002 | 0106 | sí |
+| 3 | ADD AX,0002 | 0006 | 0002 | 0109 | no aplica |
+| 3 | LOOP 0106 | 0006 | 0001 | 0106 | sí |
+| 4 | ADD AX,0002 | 0008 | 0001 | 0109 | no aplica |
+| 4 | LOOP 0106 | 0008 | 0000 | 010B | no |
+| — | INT 20 | 0008 | 0000 | fin | no aplica |
+
+Observaciones. La tabla muestra con claridad el mecanismo de LOOP; la instrucción decrementa CX y solo después decide si salta. Se observa que en la cuarta vuelta CX pasa de 0001h a 0000h y el IP avanza a 010Bh en lugar de regresar a 0106h; esa es la salida del bucle. El acumulador crece de dos en dos hasta 0008h; cuatro veces dos; tal como se esperaba. Resulta notable que LOOP no altera las banderas; la línea de estado permanece en NV UP EI PL NZ NA PO NC durante todo el bucle; los únicos cambios de paridad los introduce la suma. Esa es una diferencia de fondo con el mecanismo alterno de la sección siguiente.
+
+## Análisis del código máquina con D
+
+El volcado del programa de bucle se obtiene con `D CS:100 L0D`; el sufijo L0D solicita trece bytes; esa es la extensión exacta del programa.
+
+```
+0725:0100  B8 00 00 B9 04 00 83 C0-02 E2 FB CD 20
+           --------  --------  --------  -----  -----
+           MOV AX,0  MOV CX,4  ADD AX,2  LOOP   INT 20
+            3 bytes   3 bytes   3 bytes  2 by.  2 by.
+```
+
+Se observa que la longitud de cada instrucción depende de su codificación y no de su complejidad aparente. Las dos cargas inmediatas ocupan tres bytes cada una porque arrastran un operando de 16 bits. La suma inmediata también ocupa tres bytes; por otra razón; el opcode 83h corresponde a la forma que acepta un operando inmediato de ocho bits con extensión de signo; 02h viaja en un solo byte y el byte C0h identifica el registro destino. LOOP ocupa dos bytes porque su operando es un desplazamiento de un solo byte. INT 20 ocupa dos bytes porque su operando es el número de interrupción. El programa completo suma trece bytes y realiza cuatro sumas de forma iterativa; una versión sin bucle que repitiera la suma cuatro veces ocuparía doce bytes solo en las sumas más los seis de la inicialización y la terminación; el bucle no ahorra espacio en casos tan pequeños pero escala mucho mejor.
